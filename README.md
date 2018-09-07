@@ -7,13 +7,15 @@ This directory contains code to reproduce the results from "Inferring influence 
 
 `all_blin_functions.R` -- Load supporting functions and libraries. Requires internet connection to download data and existing code.
 
-`MLE_functions.R` -- Functions to estimate BLIN model. 
-
-`sid_functions.R` -- Functions to estimate BLIN model for ICEWS data set.
+`countries.txt` -- Countries and their continents used in analysis.
 
 `cv_functions.R` -- Cross-validation functions. 
 
+`MLE_functions.R` -- Functions to estimate BLIN model. 
+
 `misspec_run_cv.R` -- Cross-validation script. 
+
+`sid_functions.R` -- Functions to estimate BLIN model for ICEWS data set.
 
 
 ## Supporting code and data
