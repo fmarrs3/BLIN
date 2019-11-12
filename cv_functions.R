@@ -1,311 +1,261 @@
 
 
 #### Run simulation study
-run_first_cv_sims <- function(nsims=1000, 
-                              verbose=F,
-                              outdir=file.path(getwd(), "results"))  # where to write
+run_cv <- function(nsims=1e2,       # number of simulations
+                   qs=c(0,.5,.9),   # fractions of zero entries
+                   outdir=file.path(getwd(), "results"))  # where to write
 {
-  use_cov <- gen_cov <- F
-  k <- m <- 2   # ranks of BLIN fits
-  S <- 10
-  L <- 9
-  tau <- 50
+  outdir_coef <- outdir
   dir.create(outdir, showWarnings = F)
+  dir.create(outdir_coef, showWarnings = F)
   
-    for(tmax in c(5,10,20)){
+  tau <- 1
+  S <- 10
+  L <- S
+  use_cov <- FALSE
+  gen_cov <- FALSE   # generate data with covariates?
+  # k <- m <- 1   # ranks ofBiTEN fits
+  nsims <- 1e2
+  tmaxes <- c(10, 20, 50)
+  nfold <- min(tmaxes)
+  gen_types <- c("blin", "bilinear")
+  burn <- max(tmaxes)
+  R2target <- .75
+  diagval <- 0
+  # qs <- c(0, .5, .9)
+  
+  
+  for(q in qs){ 
     
-      for(gen_type in c("biten_full", "bilinear", "biten")){
+    # Find scaling values for A and B
+    ks <- 2^seq(-2, 2, by=.05)
+    temp <- cbind(ks, 0, 0)
+    for(i in 1:length(ks)){
+      
+      k <- ks[i]
+      
+      seedA <- 1
+      set.seed(seedA)
+      A <- outer(rnorm(S), rnorm(S), "*") /3.5
+      diag(A) <- NA
+      A[which(abs(A) < quantile(abs(A)[!is.na(abs(A))], q))] <- 0
+      diag(A) <- diagval
+      # abs(eigen(A)$values)
+      
+      
+      seedB <- 11
+      set.seed(seedB)
+      B <- outer(rnorm(L), rnorm(L), "*")/3.5
+      diag(B) <- NA
+      B[which(abs(B) < quantile(abs(B)[!is.na(abs(B))], q))] <- 0
+      diag(B) <- diagval
+      # abs(eigen(B)$values)
+      
+      theta_blin <- k*kronecker(B, diag(S)) + k*kronecker(diag(L), t(A))
+      if(max(abs(eigen(theta_blin)$values)) < 1){
+        vecSigma_blin <- solve(diag(S^2*L^2) - kronecker(theta_blin, theta_blin), c(diag(S*L)))
+        s1blin <- sum(diag(crossprod(theta_blin) %*% matrix(vecSigma_blin, S*L, S*L)))
         
-        # Make error file
-        if(use_cov){ post <- "_withcov" } else {post <- ""}
-        error_file <- paste0("errors_gen_", gen_type, "_S", S, "_tau", tau, "_t", tmax, post, ".txt")
-        out <- data.frame(matrix(NA, nrow=0, ncol=29))
-        names(out) <- c("gen_type", "fit_type", "S", "L", "tmax", "tau", "sim", "seed", "rankA", "rankB", "init", "CV", "rmse_out", "made_out", "rmse_in", "made_in", "R2_out", "R2_in", 
-                        "fittime", "withcov", "obs_sparsityA", "obs_sparsityB", "precA", "recallA", "precB", "recallB", "MSEA", "MSEB", "MSEdiag")
-        write.table(out, file.path(outdir, error_file), quote=F, sep = "\t", row.names = F)
-        for(sim in 1:nsims){
-          
-          # Generate data
-          seed <- sim
-          data <- generate_data(S, L, tmax, tau, 
-                                rankA <- S*(gen_type != "biten") + 2*(gen_type == "biten"), 
-                                rankB <- L*(gen_type != "biten") + 2*(gen_type == "biten"), 
-                                muAB=0, sigmaAB=1, sigmaD=1, genAB=T, use_cov=gen_cov, seed=seed, gen_type=gen_type)
-          Atrue <- data$A
-          Btrue <- data$B
-          Y <- data$Y
-          D <- data$D
-          X <- data$X
-          
-          for(type in c("biten", "bilinear", "biten_full", "biten_sparse")){
-            results <- misspec_model_fit(type, Y, X, D, k, m, use_cov, gen_type, S, L, tmax, tau, sim, seed, rankA, rankB, Atrue, Btrue)
-            
-            write.table(results$out, file.path(outdir, error_file), quote=F, sep = "\t", row.names = F, col.names=F, append=T)
-          }
-          
-        }
-        if(verbose){
-          cat("tmax: \t", tmax, "\t data generation type: \t", gen_type, "\n")
-        }
-        
-        
-        
-        if(gen_type == "biten_full"){   # sparse version
-          # Make error file
-          if(use_cov){ post <- "_withcov" } else {post <- ""}
-          error_file <- paste0("errors_gen_sparse_", gen_type, "_S", S, "_tau", tau, "_t", tmax, post, ".txt")
-          out <- data.frame(matrix(NA, nrow=0, ncol=29))
-          names(out) <- c("gen_type", "fit_type", "S", "L", "tmax", "tau", "sim", "seed", "rankA", "rankB", "init", "CV", "rmse_out", "made_out", "rmse_in", "made_in", "R2_out", "R2_in", 
-                          "fittime", "withcov", "obs_sparsityA", "obs_sparsityB", "precA", "recallA", "precB", "recallB", "MSEA", "MSEB", "MSEdiag")
-          write.table(out, file.path(outdir, error_file), quote=F, sep = "\t", row.names = F)
-          for(sim in 1:nsims){
-            
-            # Generate data
-            seed <- sim
-            data <- generate_data(S, L, tmax, tau, 
-                                  rankA <- S*(gen_type != "biten") + 2*(gen_type == "biten"), 
-                                  rankB <- L*(gen_type != "biten") + 2*(gen_type == "biten"), 
-                                  muAB=0, sigmaAB=1, sigmaD=1, genAB=T, use_cov=gen_cov, seed=seed, gen_type=gen_type, sparse=2/S)
-            Atrue <- data$A
-            Btrue <- data$B
-            Y <- data$Y
-            D <- data$D
-            X <- data$X
-            
-            for(type in c("biten", "bilinear", "biten_full", "biten_sparse")){
-              results <- misspec_model_fit(type, Y, X, D, k, m, use_cov, gen_type, S, L, tmax, tau, sim, seed, rankA, rankB, Atrue, Btrue)
-              
-              write.table(results$out, file.path(outdir, error_file), quote=F, sep = "\t", row.names = F, col.names=F, append=T)
-            }
-            
-          }
-          
-          
-          if(verbose){
-            cat("tmax: \t", tmax, "\t data generation type: \t", gen_type, "sparse \n")
-          }
-          
-        }
-        
-        
-        
+        temp[i,2] <- R2blin <- s1blin / (s1blin + S*L)
+      } else {
+        temp[i,2] <- NA
       }
+      
+      theta_bilinear <- kronecker(B, A)*k^2
+      if(max(abs(eigen(theta_bilinear)$values)) < 1){
+        
+        vecSigma_bilinear <- solve(diag(S^2*L^2) - kronecker(theta_bilinear, theta_bilinear), c(diag(S*L)))
+        s1bilinear <- sum(diag(crossprod(theta_bilinear) %*% matrix(vecSigma_bilinear, S*L, S*L)))
+        temp[i,3] <- R2bilinear <- s1bilinear / (s1bilinear + S*L)
+      } else {
+        temp[i,3] <- NA
+      }
+      
+      # cat("frac=", i/length(ks), "\n")
     }
+    
+    
+    k1 <- ks[which.min(abs(temp[,2] - R2target))]
+    Ablin <- k1*A
+    Bblin <- k1*B
+    
+    k2 <- ks[which.min(abs(temp[,3] - R2target))]
+    Abilinear <- k2*A
+    Bbilinear <- k2*B
+    
+    colnames(temp) <- c("k", "R2_blin", "R2_bilinear")
+    write.table(temp, file.path(outdir, paste0("ks_q", 100*q, ".txt")))
+    # print(temp)
+    
+    
+    R2s <- array(0, c(nsims, 4, length(tmaxes), 2))
+    Ahats <- array(0, c(S, S, nsims, 4, length(tmaxes), 2, nfold))
+    Bhats <- array(0, c(L, L, nsims, 4, length(tmaxes), 2, nfold))
+    dimnames(R2s)[[4]] <- dimnames(Ahats)[[6]] <- dimnames(Bhats)[[6]] <- gen_types
+    
+    
+    
+    
+    for(gen_type in gen_types){
+      
+      for(i in 1:nsims){
+        set.seed(i)
+        Y0 <- matrix(rnorm(S*L), S, L)*tau
+        Yall <- array(0, c(S, L, max(tmaxes) + 1 + burn))
+        
+        if(gen_type == "bilinear"){
+          A <- Abilinear
+          B <- Bbilinear
+          Yall[,,1] <- t(A) %*% Y0 %*% B + tau*matrix(rnorm(S*L), S, L)
+          for(j in 1 + 1:(burn + max(tmaxes)) ){
+            Yall[,,j] <- t(A) %*% Yall[,,j-1] %*% B + tau*matrix(rnorm(S*L), S, L)
+          }
+        } else if (gen_type == "blin"){
+          A <- Ablin
+          B <- Bblin
+          Yall[,,1] <- t(A) %*% Y0 + Y0 %*% B + tau*matrix(rnorm(S*L), S, L)
+          for(j in 1 + 1:(burn + max(tmaxes)) ){
+            Yall[,,j] <- t(A) %*% Yall[,,j-1] + Yall[,,j-1] %*% B + tau*matrix(rnorm(S*L), S, L)
+          }
+        }
+        
+        for(k in 1:length(tmaxes)){
+          tmax <- tmaxes[k]
+          
+          Y <- Yall[,,burn + 2:(tmax + 1)]
+          D <- Yall[,,burn + 1:tmax]
+          Yp <- array(0, c(dim(Y), 4))
+          if(tmax > nfold){
+            set.seed(1)
+            icv <- sample((1:tmax) %% nfold + 1)
+          } else {
+            icv <- 1:nfold
+          }
+          
+          
+          for(j in 1:nfold){
+            itest <- which(icv == j)
+            itrain <- which(icv != j)
+            
+            Ytrain <- Y[,,itrain]
+            Dtrain <- D[,,itrain]
+            Dtest <- D[,,itest]
+            
+            res <- mlm.ALS(Ytrain, Dtrain, verbose=F, tol = 1e-10, imax=1000)
+            Yp[,,itest,1] <- drop(tprod(Dtest, res[[1]]))
+            Ahats[,,i,1,k,gen_type,j] <- t(res[[1]][[1]])
+            Bhats[,,i,1,k,gen_type,j] <- t(res[[1]][[2]])
+            
+            r <- fit_MLE_array_additive(Ytrain, Dtrain, X =NA, verbose=FALSE, use_cov=FALSE, tol = 1e-8)
+            Yp[,,itest,2] <- amprod(Dtest, r$A, 1) + amprod(Dtest, t(r$B), 2)
+            Ahats[,,i,2,k,gen_type,j] <- r$A
+            Bhats[,,i,2,k,gen_type,j] <- r$B
+            
+            r <- additive_regression(Ytrain, Dtrain, NA, test_rank = F, type="biten", use_cov=FALSE, penalty = 1, whichlambda="min")
+            Yp[,,itest,3] <- amprod(Dtest, r$A, 1) + amprod(Dtest, t(r$B), 2)
+            Ahats[,,i,3,k,gen_type,j] <- r$A
+            Bhats[,,i,3,k,gen_type,j] <- r$B
+            
+            r <- fit_MLE_array(Ytrain, Dtrain, NA, 1, 1, verbose=F, init="ran", sigma_init=1, use_cov=FALSE)
+            Yp[,,itest,4] <- amprod(Dtest, r$A, 1) + amprod(Dtest, t(r$B), 2)
+            Ahats[,,i,4,k,gen_type,j] <- r$A
+            Bhats[,,i,4,k,gen_type,j] <- r$B
+          }
+          
+          y0 <- sum(Y^2)
+          R2s[i,,k, gen_type] <- sapply(1:4, function(z) 1 - sum((Yp[,,,z] - Y)^2) / y0)
+        }
+        
+        cat("sim ", i, "\n")
+        if(as.logical(writeout)){
+          save(R2s, file=file.path(outdir, paste0("R2_q", q*100, ".rda")))
+        }
+        if(as.logical(writeout)){
+          save(Ahats, Bhats, file=file.path(outdir_coef, paste0("coefs_q", q*100, ".rda")))
+        }
+      }
+      
+    }
+    
+    
+    apply(R2s[,,,1,drop=FALSE], 2:3, mean)
+    apply(R2s[,,,2,drop=FALSE], 2:3, mean)
+    
+    apply(R2s[,,,1,drop=FALSE], 2:3, sd)
+    apply(R2s[,,,2,drop=FALSE], 2:3, sd)
+    
+    
+    
+  }
+  
+  
   
 }
 ####
 
 
-#### Plots for simulation study
-plot_first_cv <- function(plotdir=file.path(getwd(), "plots"), 
-                          readdir=file.path(getwd(), "results"))
+#### Plots for simulation study 
+plot_cv <- function(qs=c(0,.5,.9),                         # fractions of zero entries
+                    plotdir=file.path(getwd(), "plots"),    # where to write
+                    readdir=file.path(getwd(), "results")) # where to read
+                    
 {
   
   require("RColorBrewer")
   dir.create(plotdir, showWarnings = F)
-
+  colors <- c(brewer.pal(11, "Spectral")[c(1,8:10)], "gray60")
+  fittypes <- c("Bilinear", "BLIN", "BLIN Sparse", "BLIN Reduced" )
+  tmaxes <- c(10, 20, 50)
   
-  post <- ".txt" # "t10_withcov.txt"
-  colors <- c(brewer.pal(8, "Set3")[c(1,6,5,4)], "gray60") #[2:4], "black", "gray60")
-  colorsnew <- c(brewer.pal(11, "Spectral")[c(8:10,1)], NA)
-  
-  # inpath <- "./results_rerun1000_sparse_par"   # ./results_rerun1000_par
-  for(inpath in readdir){
+  setwd("readdir")
+  for(q in qs){
+    
+    ps <- paste0("_q", q*100)
+    load(paste0("R2", ps, ".rda"))
+    
+    dimnames(R2s)[[2]] <- fittypes   #<- c("Bilinear", "BLIN", "BLIN Sparse", "BLIN Reduced" )
+    dimnames(R2s)[[3]] <- tmaxes    # <- c(10, 20, 50)
+    gentypes <- dimnames(R2s)[[4]]
     
     
-    # Read in data
-    d <- NULL
-    count <- 0
-    files <- list.files(path = inpath, pattern=paste0("errors_+.*(",post,")+"))
-    for(f in files){
-      count <- count + 1
-      data <- read.table(file.path(inpath, f), header=T)
-      if(length(grep("sparse", f))   > 0){
-        data$gen_type <- "biten_sparse"
-      }
-      
-      # if(length(data$fittime) == 0){ data$fittime <- NA}  # missing column in OLS code
-      if(count == 1){ d <- data} else {
-        d <- rbind(d, data)
-      }
-    }
-    
-    # unique(d$gen_type)
-    # d$gen_type[d$gen_type == 1] <- "bilinear"
-    # d$gen_type[d$gen_type == 2] <- "biten_full"
-    # d$gen_type[d$gen_type == 3] <- "biten"
-    # 
-    plot_types <- c("biten_full", "biten", "biten_sparse", "bilinear") 
-      # c("bilinear", "biten_full", "biten", "biten_sparse")   #, "mu")  mean model at zero for both
-    gen_types <- unique(d$gen_type)  #  c("bilinear", "biten_full", "biten")
-    
-
-    
-    
-    pull_data_Sfixed_time <- function(gen_type, tau, S, plot_types, plot_var, trange, qin, meanin=T)
-    {
-      box <- box_avg <- NULL
-      
-      if(min(trange) < 10){   # do quantiles only when tmax < 5
-        box_avg_q <- NULL
-        
-        for(tmax in trange){
-          # plot_var <- "rmse_out"
-          for(type in plot_types){
-            rows <- d$gen_type == gen_type & d$fit_type == type & d$tau == tau & d$S == S & d$tmax == tmax   # rows of interest
-            # unavg <- d[rows, plot_var]
-            unavg <- as.numeric(sapply(unique(d[rows, "sim"]), function(x) mean(d[rows, plot_var][d[rows, "sim"] == x])))
-            unavg2 <- quantile(unavg, c(.025,.1,.5,.9,.975), na.rm=T)
-            unavg2[3] <- mean(unavg, na.rm=T)
-            box_avg_q <- cbind(box_avg_q, unavg2)   # quantiles
-          }
-          box_avg_q <- cbind(box_avg_q, matrix(NA, nrow=nrow(box_avg_q), ncol=1))   # columns of NAs for space between boxplots
-        }
-        
-        box_avg_q <- box_avg_q[,-ncol(box_avg_q)]
-        
-        
-        return(list(box=NA, box_avg=NA, box_avg_q=box_avg_q))
-      } else {
-        for(tmax in trange){
-          # plot_var <- "rmse_out"
-          for(type in plot_types){
-            rows <- d$gen_type == gen_type & d$fit_type == type & d$tau == tau & d$S == S & d$tmax == tmax   # rows of interest
-            unavg <- d[rows, plot_var]
-            box <- cbind(box, as.numeric(unavg))   # not averaged over sims, i.e. not avg CV
-            
-            box_avg <- cbind(box_avg, as.numeric(sapply(unique(d[rows, "sim"]), function(x) mean(d[rows, plot_var][d[rows, "sim"] == x]))))  # average over simulation numbers
-          }
-          box <- cbind(box, matrix(NA, nrow=nrow(box), ncol=1))   # columns of NAs for space between boxplots
-          box_avg <- cbind(box_avg, matrix(NA, nrow=nrow(box_avg), ncol=1))   # columns of NAs for space between boxplots
-        }
-        
-        box <- box[,-ncol(box)]   # remove last column
-        box_avg <- box_avg[,-ncol(box_avg)]
-        
-        # Quantiles of average box
-        box_avg_q <- apply(box_avg, 2, quantile, qin, na.rm=T)
-        if(meanin){
-          box_avg_q[3,] <- apply(box_avg, 2, mean, na.rm=T)
-        }
-        
-        return(list(box=box, box_avg=box_avg, box_avg_q=box_avg_q))
-      }
-    }
-    
-    
-    
-    
-    # Time on x-axis, quantiles
-    taurange <- 50
-    trange <- c(5,10,20)
     blw <- 2.5
-    qin <- c(0,.1,.5,.9,1)
-    
-    for(S in c(10)){
-      for(tau in taurange){
-        for(gen_type in gen_types){
-          
-          # Plot MSPE (out of sample)
-          plot_var <- "R2_out"
-          boxout <- pull_data_Sfixed_time(gen_type, tau, S, plot_types, plot_var, trange, qin, meanin=F)$box_avg_q
-          plot_var <- "R2_in"
-          boxin <- pull_data_Sfixed_time(gen_type, tau, S, plot_types, plot_var, trange, meanin=F)$box_avg_q
-          
-          yrange <- c(-1,1)
-          if(gen_type == "bilinear"){ 
-            yax = "s"
-            margs <- c(3,2,.5,.5)
-          } else {
-            yax = "n"
-            margs <- c(3,.5,.5,.5)
-          }
-          
-          pdf(file.path(plotdir, paste0("line_gen_", gen_type, "_S", S,  "_tau", tau, ".pdf")), width=4, height=4.4)
-          par(mar=margs, cex.axis=1.3, cex.lab=1.3, mgp=c(1.7,.5,0))
-          plot(NA, NA, xlab=expression(T), xaxt="n",ylim=yrange, yaxt=yax, xlim=c(1,ncol(boxout)), ylab="")
-          jitter = .17
-          for(j in 1:4){
-            # j <- 1
-            xseq <- 1:3
-            yseq <- (xseq-1)*5 + j
-            boxoutplot <- boxout[3,yseq]
-            boxoutplot[boxoutplot < -1] <- NA
-            points(yseq, boxoutplot, pch=1, type="o", lwd=1.6, col=colorsnew[j], cex=1.2)
-            boxarrows <- boxout[, yseq]
-            # boxarrows[, is.na(boxoutplot)] <- NA
-            arrows(x0=yseq, x1=yseq, y0=boxarrows[1,], y1=boxarrows[5,], code=3, angle=90, length=.06, lwd=1.6, col=colorsnew[j])
-            
-            points(yseq+jitter, boxin[3,yseq], pch=4, type="o", lwd=1.6, col=colorsnew[j], cex=1.2, lty=2)
-            arrows(x0=yseq+jitter, x1=yseq+jitter, y0=boxin[1,yseq], y1=boxin[5,yseq], code=3, angle=90, length=0.06, lwd=1.6, col=colorsnew[j], lty=1)
-          }
-          
-          
-          atrange <- seq((length(plot_types)+1)/2, length(trange)*(length(plot_types)+1), by=(length(plot_types)+1))
-          axis(1, trange, at=atrange)
-          abline(v=atrange[-length(atrange)] + length(plot_types)/2 + 1/2, lty=1, lwd=.7, col="gray80")
-          abline(h=0, col="black", lwd=2, lty=3)
-          if(gen_type == "biten"){
-            legend("bottomleft", legend=c("Bilinear", "BLIN", "BLIN, rank 2", "BLIN, sparse",  'in-sample'), col=c(colorsnew[c(4,1:3)], "gray50"), lwd=.9*1.6, bty = "n", cex = 1.2,
-                   lty=c(rep(1,4),2), pch=c(rep(1,4),4) )
-          }
-          dev.off()
-          
-          ### Old plots
-          # # Plot MSPE (out of sample)
-          # plot_var <- "R2_out"
-          # box <- pull_data_Sfixed_time(gen_type, tau, S, plot_types, plot_var, trange, qin, meanin=F)$box_avg_q
-          # # if(gen_type == "bilinear"){
-          # #   yrange <- range(box, na.rm=T)
-          # # } else { yrange <- c(0,1)}
-          # yrange <- c(-1,1)
-          # if(gen_type == "bilinear"){ yax = "s"} else {yax = "n"}
-          # 
-          # pdf(file.path(plotdir, paste0("box_R2_out_gen_", gen_type, "_S", S,  "_tau", tau, ".pdf")), width=4, height=4)
-          # par(mar=c(3,2,.5,2), cex.axis=1.3, cex.lab=1.3, mgp=c(1.7,.5,0))
-          # boxplot(box, border=colors, 
-          #         # ylab=expression("CV-average Out-of-sample R"^"2"), 
-          #         xlab=expression(T), 
-          #         xaxt="n", 
-          #         ylim=yrange, range=0, whisklty=1, boxlwd=blw, stapleltwd=blw, whisklwd=blw, medlwd=blw, staplelwd=blw,
-          #         yaxt=yax)
-          # atrange <- seq((length(plot_types)+1)/2, length(trange)*(length(plot_types)+1), by=(length(plot_types)+1))
-          # axis(1, trange, at=atrange)
-          # abline(v=atrange[-length(atrange)] + length(plot_types)/2 + 1/2, lty=1, lwd=.7, col="gray80")
-          # abline(h=0, col="black", lwd=2, lty=3)
-          # # if(gen_type == "bilinear"){
-          # #   legend("topleft", legend=c("Bilinear", "BiTEN", "BiTEN, rank 2", "BiTEN, sparse"), col=colors, lwd=.9*blw, bty = "n", cex = .9)
-          # # }
-          # dev.off()
-          # 
-          # 
-          # # Plot MSPE in-sample
-          # plot_var <- "R2_in"
-          # box <- pull_data_Sfixed_time(gen_type, tau, S, plot_types, plot_var, trange, meanin=F)$box_avg_q
-          # # if(gen_type == "bilinear"){
-          # #   yrange <- range(box, na.rm=T)
-          # # } else { yrange <- c(0,1)}
-          # 
-          # pdf(file.path(plotdir, paste0("box_R2_in_gen_", gen_type, "_S", S,  "_tau", tau, ".pdf")), width=4, height=3.5)
-          # par(mar=c(.5,2,.5,2), cex.axis=1.3, cex.lab=1.3, mgp=c(1.7,.5,0))
-          # boxplot(box, border=colors, 
-          #         # ylab=expression("CV-average In-sample R"^"2"), 
-          #         xlab=expression(T), xaxt="n", ylim=c(-1,1), 
-          #         range=0, whisklty=1, boxlwd=blw, stapleltwd=blw, whisklwd=blw, medlwd=blw, staplelwd=blw,
-          #         yaxt=yax)
-          # atrange <- seq((length(plot_types)+1)/2, length(trange)*(length(plot_types)+1), by=(length(plot_types)+1))
-          # # axis(1, trange, at=atrange)
-          # abline(v=atrange[-length(atrange)] + length(plot_types)/2 + 1/2, lty=1, lwd=.7, col="gray80")
-          # abline(h=0, col="black", lwd=2, lty=3)
-          # if(gen_type == "bilinear"){
-          #   legend("bottomleft", legend=c("Bilinear", "BiTEN", "BiTEN, rank 2", "BiTEN, sparse"), col=colors, lwd=1.3*blw, bty = "n", cex = 1.3)
-          # }
-          # dev.off()
-          
+    count <- 0
+    for(g in gentypes){
+      count <- count + 1
+      
+      ncol <- length(tmaxes)
+      boxtoplot <- NULL
+      for(i in 1:ncol){
+        temp <- apply(R2s[,,i,g], 2, quantile, c(.00, .1, .5, .9, 1), na.rm=TRUE)
+        boxtoplot <- cbind(boxtoplot, temp)
+        if(i < ncol){
+          boxtoplot <- cbind(boxtoplot, NA)
         }
-      }}
-    
+      }
+      
+      
+      png(file.path(plotdir, paste0("box_R2out_gen_", g, ps,".png")), width=7, height=5, res=200, units="in")
+      par(mar = c(3.2,3.2,.5,3.2), mgp=c(2.2,.6,0), cex.lab=1.5, cex.axis=1.5) 
+      boxplot(boxtoplot,  
+              xlab="T", 
+              ylim=c(-1,1),
+              xaxt="n",
+              border=colors,
+              range=0,
+              boxlwd=blw, whisklty=1, whisklwd=blw, staplelty=1, staplelwd=blw, outlwd=blw, medlwd=blw)
+      n2 <- length(fittypes)+1
+      axis(1, tmaxes, at=seq(n2/2, ncol*n2, by=n2))                              
+      abline(h=c(0, .75), lty=2, lwd=2, col="gray60")
+      
+      if(count == 1 & q %in% c(0.50, 0.90)){
+        legend("bottomright", paste0(fittypes), lwd=blw, col=colors, lt=1,  bty="n", cex=1.55, title="Estimated Model")
+      }
+      
+      dev.off()
+    }
   }
+  
+  
 }
 ####
 

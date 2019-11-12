@@ -6,7 +6,7 @@
 
 
 # set working directory to download location, e.g.
-setwd("~/Downloads")
+setwd("~/Desktop/BLIN_rep")
 
 # call functions and load libraries, 
 # downloads and installs `arcdiagram` from github and function files from Hoff (2015).
@@ -14,18 +14,20 @@ source("all_blin_functions.R")
 
 
 
-# Run simulations for first cross-validation study
-run_first_cv_sims(nsims=20, verbose=TRUE)
+# Run simulations for cross-validation study
+run_cv(nsims=11, qs=c(0.9))
 # runs for nsims = # of error realizations
-# simulations in the paper go to 1,000, but may take a lot of time to run
+# simulations in the paper go to 100, but may take a lot of time to run
+# qs is a vector of fractions of empty cells in coefficients. In paper, we ran for qs=c(0, 0.5, 0.9)
 
-# Make plots for first cross-validation study
-plot_first_cv()
+
+# Make plots for cross-validation study
+plot_cv()
 
 
 
 # Estimate BLIN model for the ICEWS data set
-fit_blin_sid(verbose=TRUE)
+fit_blin_sid()
 
 # Make plots of estimated networks
 plot_blin_sid()

@@ -12,9 +12,9 @@ require("foreach")
 require("doMC")
 require("foreign")  
 require("utils")
-library("devtools")
-install_github('arcdiagram',  username='gastonstat')
-require("arcdiagram")
+require("devtools")
+require("igraph")
+
 
 
 # Download bilinear code and data
@@ -24,8 +24,7 @@ download.file("https://www.stat.washington.edu/people/pdhoff/Code/hoff_2014/tfun
 
 
 # Functions
-source("MLE_functions.R")
 source("functions_als.r")
-source("misspec_run_cv.R")
+source("MLE_functions.R")
 source("cv_functions.R")
 source("sid_functions.R")

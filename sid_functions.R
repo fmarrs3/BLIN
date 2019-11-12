@@ -2,200 +2,500 @@
 
 #### Fit BLIN model to SID data
 fit_blin_sid <- function(outdir=file.path(getwd(), "results"),  # where to write
-                         readdir=file.path(getwd()),      # where to read data from
-                         verbose=F # write out into window?
-)
+                         readdir=file.path(getwd()),      # where to read 
+                         verbose=FALSE) # write out into window?
 {
+  diff <- TRUE
+  use_cov <- FALSE
+  ps <- "_multi2"
+  lagrange <- 5
+  ntail <- 543 -  lagrange
+  whichlambda <- "min"
   
+  P2 <- kb <- AICs <- array(NA, c(2, lagrange, lagrange, lagrange))
+  if(as.logical(use_cov)){ stop("Only coded for without covariates")}
   dir.create(outdir)
 
-  use_cov <- F
-  lag <- 2
-  diff <- T
-  
+  lagvec <- c(5,3,1)   # lag for each mode
+      
   #### data
-  data <- read_state_interaction_data(use_cov=F, agg=1, remakeVAR=T, lag=lag, diff=diff)
+  data <- read_state_interaction_data_multi(lagvec=lagvec, diff=diff, readdir=getwd())
   Y <- data$Y  ; D <- data$D  ;  X <- data$X
-  resp_type <- dimnames(Y)[[3]]
   ####
   
-
-  #### Sparse version
-  whichlambda <- "min"  # choose "min" or "1se"  lamabda from lasso fit
-  P2 <- matrix(NA, 1, 4)
-
-
-  #### cvfitting
+  #### fitting
   YP<-Y*0
+  out <- additive_regression_multi(Y, D, X, whichlambda=whichlambda)   # lasso fit
 
-
-  for(j in 1:4)
-  {
-    out <- additive_regression(Y[,,j,], D[,,j,], X[,,j,,], type="biten", use_cov=use_cov, test_rank=F, penalty=1, whichlambda=whichlambda)   # lasso fit
-    if(use_cov){
-      Xb <- drop(amprod(X[,,j,,], out$beta, 4))
-      cov_name <- "_withcov"
-    } else {
-      Xb <- 0
-      cov_name <- ""
-    }
-    YP[,,j,]<- amprod(D[,,j,], out$A, 1) + amprod(D[,,j,], t(out$B), 2) + Xb
-    write.table(out$A, file=file.path(outdir, paste0("A_fullfit_biten_sparse_FM_", resp_type[j], "_lag", lag, "_diff", as.numeric(diff), "_L", whichlambda, cov_name,".txt")))
-    write.table(out$B, file=file.path(outdir, paste0("B_fullfit_biten_sparse_FM_", resp_type[j], "_lag", lag, "_diff", as.numeric(diff), cov_name, "_L", whichlambda, ".txt")))
-    write.table(out$beta, file=file.path(outdir, paste0("beta_fullfit_biten_sparse_FM_", resp_type[j], "_lag", lag, "_diff", as.numeric(diff), cov_name, "_L", whichlambda, ".txt")))
-
-    #### evaluation
-    P2[1,] <- 1-apply((YP-Y)^2,3,mean,na.rm=TRUE)/
-      apply(Y^2,3,mean,na.rm=TRUE)
-    ####
-
-    write.table(P2, file=file.path(outdir, paste0("P2_fullfit_biten_sparse_FM", "_lag", lag, "_diff", as.numeric(diff),"_L", whichlambda,  cov_name,".txt")))
-    if(verbose){
-      cat("Response ", j, "\n")
-    }
-  }
-  # cat(cv,"\n")
-  ####
-
-  if(verbose){
-    cat("\nDone with sparse BLIN fit\n")
+  # Write out coefficients
+  for(j in 1:length(out$B)){
+    write.table(out$B[[j]], file=file.path(outdir, paste0("B", j, "_fullfit_biten_sparse_FM_", "_lag", paste0(c(lagvec), collapse=""), "_diff", as.numeric(diff),  ps, ".txt")))
   }
   ####
-  
-  
-  
+
 }
 ####
+  
+  
 
 
 #### Plot results from SID fits
 plot_blin_sid <- function(outdir=file.path(getwd(), "plots"),  # where to write
-                          readdir=file.path(getwd(), "results"), 
-                          countriesdir=getwd(), 
-                          fittype="biten_sparse")
+                          readdir=file.path(getwd(), "results"),    # where to read
+                          countriesdir=getwd(),    # where to read countries from
+                          fittype="biten_sparse")   # 
 {
+  
   plotdir <- outdir
-  dir.create(outdir)
-  
-  
-  diff <- TRUE
-  lag <- 2
+  dir.create(plotdir)
+  require(igraph)
+  require(RColorBrewer)
   resp <- c("mn", "mp", "vn", "vp")
-    
-  spacings <- cbind(c(-8,-9.5,-8,-8), c(-9,-8.5,-9,-8)) - 1.5
+  diff <- TRUE
+  lagvec <- c(5,3,1)
+  ps <- "_multi2"
   
-  rownames(spacings)[1:length(resp)] <- resp
-  horizontal <- T
-  
-  # colors <- brewer.pal(8, "Set2")[-6]
-  colors <- brewer.pal(11, "Spectral")[c(1,3,5,7,9,11)]
+  # Read in networks and country abbreviations
   codes <- read.table(file.path(countriesdir, "countries.txt"), header=T, stringsAsFactors = F)
-  resp <-  c("mn", "mp", "vn", "vp")
   countries <- as.vector(codes$country)
   
-  for(r in resp){
-    A <- read.table(file.path(readdir, paste0("A_fullfit_", fittype, "_FM_", r, "_lag", lag,"_diff", as.numeric(diff),"_Lmin.txt")))
-    B <- read.table(file.path(readdir, paste0("B_fullfit_", fittype, "_FM_", r, "_lag", lag, "_diff", as.numeric(diff), "_Lmin.txt")))
-    
-    A <- as.matrix(A)
-    B <- as.matrix(B)
-    diag(A) <- diag(B) <- NA
-    colnames(A) <- colnames(B) <- rownames(A) <- rownames(B) <- countries
-    
-    
-    maxval <- max(abs(c(c(A), c(B))), na.rm=T)
-    maxdeg <- max( c(rowSums(A!=0, na.rm=T) + colSums(A!=0, na.rm=T),  rowSums(B!=0, na.rm=T) + colSums(B!=0, na.rm=T)) )
-    
-    mplot <- A*(A>0)
-    groups <- codes$continent
-    
-    pdf(file.path(plotdir, paste0("Aall_", r,"_arc.pdf")), width=6, height=4)
-    par(mar=c(0,0,0,0))  #, cex.axis=.8, cex.lab=.8, mgp=c(1.7,.5,0))
-    arcplot_fm2(A, groups, colors, linespace = spacings[r, 1], maxwt=maxval, maxdeg=maxdeg, horizontal=horizontal)
-    dev.off()
-    
-    pdf(file.path(plotdir, paste0("Ball_", r,"_arc.pdf")), width=6, height=4)
-    par(mar=c(0,0,0,0))  #, cex.axis=.8, cex.lab=.8, mgp=c(1.7,.5,0))
-    arcplot_fm2(B, groups, colors, linespace = spacings[r, 2], maxwt=maxval, maxdeg=maxdeg, horizontal=horizontal)
-    dev.off()
-    
-  } 
+  
+
+  j <- 1
+  filein <- list.files(path=readdir, pattern=paste0("B", j, "_fullfit_biten_sparse_FM_", "_lag", paste0(c(lagvec), collapse=""), "_diff", as.numeric(diff),  ps, ".txt"))
+  if(length(filein) == 1){
+    B <- vector("list", 3)
+    for(j in 1:length(B)){
+      B[[j]] <- as.matrix( read.table(file=file.path(readdir, paste0("B", j, "_fullfit_biten_sparse_FM_", "_lag", paste0(c(lagvec), collapse=""), "_diff", as.numeric(diff),  ps, ".txt"))) )
+    }
+  }
+  length(B)
+  
+  # outer(diag(B[[1]]), diag(B[[2]]), "+")
   
   
   
-  # data <- read_state_interaction_data(use_cov=F, agg=1, remakeVAR=T, lag=lag, diff=diff)
-  # Y <- data$Y  ; D <- data$D  ;  X <- data$X
-  # resp_type <- dimnames(Y)[[3]]
-  # S <- dim(Y)[1]   ;   L <- dim(Y)[2]   ;   tmax <- dim(Y)[4]
+  lb <- -.0037
+  ub <- .0121
+  
+  
+  A <- B
+  for(j in 1:length(B)){
+    A[[j]] <- B[[j]]
+    if(j < 3){
+      colnames(A[[j]]) <- rownames(A[[j]]) <- countries
+    } else {
+      colnames(A[[j]]) <- rownames(A[[j]]) <- resp
+    }
+    # A[[j]][A[[j]] < ub & A[[j]] > lb] <- 0
+    diag(A[[j]]) <- 0
+  }
+  
+  
+  
+  A <- B
+  for(j in 1:length(B)){
+    A[[j]] <- B[[j]]
+    if(j < 3){
+      colnames(A[[j]]) <- rownames(A[[j]]) <- countries
+    } else {
+      colnames(A[[j]]) <- rownames(A[[j]]) <- resp
+    }
+    # A[[j]][A[[j]] < ub & A[[j]] > lb] <- 0
+    diag(A[[j]]) <- 0
+  }
+  
+  # Plot params
+  frac <- 1.5   # dialation of C relative to A and B
+  vlc <- .9    # vertex label cex
+  av <- 6.5     # vertex size intercept
+  bv <- 165     # vertex size slope
+  eaw <- 2.    # edge arrow width
+  ae <- 6       # edge size intercept
+  be <- 200     # edge size slsope
+  ecurve <- -.15
+  vcol="gray25"
+  alpha_node <- .45
+  vdist <- 1.42
+  
+  continents <- unique( codes$continent[order(codes$continent)] )
+  circle_colors <- brewer.pal(11, "Spectral")[c(1,5,11,3,9,7)]
+  # circle_colors <- brewer.pal(6, "Spectral")
+  # circle_colors_trans <- paste0(circle_colors, 95)
+  library("igraph")
+  
+  j <- 1
+  C <- as.matrix(A[[j]])
+  colnames(C) <- rownames(C) <- countries
+  i1 <- which(C != 0, arr.ind=TRUE)
+  EL <- cbind(countries[i1[,1]], countries[i1[,2]])
+  
+  net <- graph_from_edgelist(EL, directed=TRUE)
+  E(net)$weight <- C[i1]                           
+  V(net)$label <- names(V(net))
+  V(net)$continent <- codes$continent[match(names(V(net)), codes$country)]
+  V(net)$color <- alpha(circle_colors[ match(V(net)$continent, continents) ], alpha_node)
+  ordering <- V(net)$label[ order(V(net)$continent) ] #[keep]
+  L <- layout_in_circle(net, order=ordering)
+  # V(net)$label <- codes$country
+  # V(net)$color <- circle_colors_trans[match(codes$continent[ match(V(net)$label, codes$country) ], continents)]
+  
+  # Colors
+  temp0 <- circle_colors[ match(codes$continent[match(as_edgelist(net)[,1], countries)], continents) ]
+  temp <- cbind(temp0, abs(E(net)$weight) / max(abs( E(net)$weight )) )
+  ismall <- which(E(net)$weight <= ub & E(net)$weight >= lb)
+  ibig <- setdiff(1:length(E(net)$weight), ismall)
+  temp[ismall,1] <- "gray85"
+  # E(net)$weight[ismall] <- 0
+  temp2 <- cbind(temp[,1], abs(E(net)$weight) / max(abs( E(net)$weight )) )
+  E(net)$color <- apply(temp2, 1, function(z) alpha(z[1], as.numeric(z[2])))
+  
+  E(net)$lty <- 3 - 2*(E(net)$weight >0)
+  
+  V(net)$size <- av + bv*(rowSums(abs(C)) )[V(net)$label]
+  E(net)$width <- ae + be*abs(E(net)$weight)
+  
+  
+  png(file.path(plotdir, paste0("B_circle_", j, "_v3.png")), width=5, height=5, res=200, units="in")
+  par(mar = c(0, 0, 0, 0), mgp=c(1.7,.5,0), cex.lab=1.1, cex.axis=1.1) 
+  plot(net, 
+       layout=L, 
+       edge.curved=ecurve,
+       edge.arrow.width	=eaw,
+       vertex.label.font=2,
+       vertex.label.family="Helvetica",
+       vertex.label.color=vcol, 
+       vertex.label.cex=vlc, 
+       vertex.label.degree=pi/2,
+       vertex.label.dist=vdist,
+       vertex.frame.color=NA)
+  
+  tnet <- net
+  temp2[ismall, 2] <- 0
+  temp2[ibig, 2] <- 1
+  E(tnet)$color <- apply(temp2, 1, function(z) alpha(z[1], as.numeric(z[2])))
+  
+  plot(tnet, add=TRUE, 
+       layout=L, 
+       edge.curved=ecurve,
+       edge.arrow.width	=eaw,
+       vertex.label.font=2,
+       vertex.label.family	= "Helvetica",
+       vertex.label.color=vcol, 
+       vertex.label.cex=vlc, 
+       vertex.label.degree=pi/2,
+       vertex.label.dist=vdist,
+       vertex.frame.color=NA)
+  
+  dev.off()
+  
+  
+  
+  j <- 2
+  C <- as.matrix(A[[j]])
+  colnames(C) <- rownames(C) <- countries
+  i1 <- which(C != 0, arr.ind=TRUE)
+  EL <- cbind(countries[i1[,1]], countries[i1[,2]])
+  
+  net <- graph_from_edgelist(EL, directed=TRUE)
+  E(net)$weight <- C[i1]                           
+  V(net)$label <- names(V(net))
+  V(net)$continent <- codes$continent[match(names(V(net)), codes$country)]
+  V(net)$color <- alpha(circle_colors[ match(V(net)$continent, continents) ], alpha_node)
+  ordering <- V(net)$label[ order(V(net)$continent) ] #[keep]
+  L <- layout_in_circle(net, order=ordering)
+  # V(net)$label <- codes$country
+  # V(net)$color <- circle_colors_trans[match(codes$continent[ match(V(net)$label, codes$country) ], continents)]
+  
+  # Colors
+  temp0 <- circle_colors[ match(codes$continent[match(as_edgelist(net)[,1], countries)], continents) ]
+  temp <- cbind(temp0, abs(E(net)$weight) / max(abs( E(net)$weight )) )
+  ismall <- which(E(net)$weight <= ub & E(net)$weight >= lb)
+  ibig <- setdiff(1:length(E(net)$weight), ismall)
+  temp[ismall,1] <- "gray85"
+  # E(net)$weight[ismall] <- 0
+  temp2 <- cbind(temp[,1], abs(E(net)$weight) / max(abs( E(net)$weight )) )
+  E(net)$color <- apply(temp2, 1, function(z) alpha(z[1], as.numeric(z[2])))
+  
+  E(net)$lty <- 3 - 2*(E(net)$weight >0)
+  
+  V(net)$size <- (av + bv*(rowSums(abs(C))  )[V(net)$label])   #+ colSums(abs(C))
+  E(net)$width <- (ae + be*abs(E(net)$weight))
+  
+  
+  png(file.path(plotdir, paste0("B_circle_", j, "_v3.png")), width=5, height=5, res=200, units="in")
+  par(mar = c(0, 0, 0, 0), mgp=c(1.7,.5,0), cex.lab=1.1, cex.axis=1.1) 
+  plot(net, 
+       layout=L, 
+       edge.curved=ecurve,
+       edge.arrow.width	=eaw,
+       vertex.label.font=2,
+       vertex.label.family	= "Helvetica",
+       vertex.label.color=vcol, 
+       vertex.label.cex=vlc, 
+       vertex.label.degree=pi/2,
+       vertex.label.dist=vdist,
+       vertex.frame.color=NA)
+  
+  tnet <- net
+  temp2[ismall, 2] <- 0
+  temp2[ibig, 2] <- 1
+  E(tnet)$color <- apply(temp2, 1, function(z) alpha(z[1], as.numeric(z[2])))
+  
+  plot(tnet, add=TRUE, 
+       layout=L, 
+       edge.curved=ecurve,
+       edge.arrow.width	=eaw,
+       vertex.label.font=2,
+       vertex.label.family	= "Helvetica",
+       vertex.label.color=vcol, 
+       vertex.label.cex=vlc, 
+       vertex.label.degree=pi/2,
+       vertex.label.dist=vdist,
+       vertex.frame.color=NA)
+  
+  dev.off()
+  # edge.lty=E(net)$edge.lty, 
+  
+  # edge.width=E(net)$edge.width,
+  # vertex.color=V(net)$vertex.color, 
+  
+  
+  # vertex.size = V(net)$vertex.size, 
+  
+  
+  
+  
+  circle_colors <- brewer.pal(11, "Spectral")[c(5,1,9,11)]  
+  circle_colors_trans <- paste0(circle_colors, 95)
+  
+  j <- 3
+  C <- as.matrix(A[[j]])
+  colnames(C) <- rownames(C) <- resp
+  i1 <- which(C != 0, arr.ind=TRUE)
+  EL <- cbind(resp[i1[,1]], resp[i1[,2]])
+  
+  
+  net <- graph_from_edgelist(EL, directed=TRUE)
+  E(net)$weight <- C[i1]                           
+  V(net)$label <- names(V(net))
+  # V(net)$continent <- codes$continent[match(names(V(net)), codes$country)]
+  V(net)$color <- alpha(circle_colors, alpha_node)
+  ordering <- order(V(net)$label)
+  L <- layout_in_circle(net, order=c("vn", "mn", "vp", "mp"))
+  # V(net)$label <- codes$country
+  # V(net)$color <- circle_colors_trans[match(codes$continent[ match(V(net)$label, codes$country) ], continents)]
+  
+  # Colors
+  temp0 <- circle_colors[match(as_edgelist(net)[,1], V(net)$label)]
+  temp <- cbind(temp0, abs(E(net)$weight) / max(abs( E(net)$weight )) )
+  ismall <- which(E(net)$weight <= ub & E(net)$weight >= lb)
+  ibig <- setdiff(1:length(E(net)$weight), ismall)
+  temp[ismall,1] <- "gray85"
+  # E(net)$weight[ismall] <- 0
+  temp2 <- cbind(temp[,1], abs(E(net)$weight) / max(abs( E(net)$weight )) )
+  E(net)$color <- apply(temp2, 1, function(z) alpha(z[1], as.numeric(z[2])))
+  
+  
+  
+  
+  E(net)$lty <- 3 - 2*(E(net)$weight >0)
+  
+  V(net)$size <- (av + bv*(rowSums(abs(C))  )[V(net)$label])*frac   # + colSums(abs(C))
+  E(net)$width <- (ae + be*abs(E(net)$weight))*frac
+  
+  
+  png(file.path(plotdir, paste0("B_circle_", j, "_v3.png")), width=5/frac, height=5/frac, res=200, units="in")
+  par(mar = c(1, 1, 1, 1), mgp=c(1.7,.5,0), cex.lab=1.1, cex.axis=1.1) 
+  plot(net, 
+       layout=L, 
+       edge.curved=ecurve,
+       edge.arrow.width	=eaw*frac,
+       vertex.label.font=2,
+       vertex.label.family	= "Helvetica",
+       vertex.label.color=vcol, 
+       vertex.label.cex=vlc*frac+.3, 
+       vertex.label.degree=pi/2,
+       vertex.label.dist=vdist*frac+c(0, 2.5, 0, 1),
+       vertex.frame.color=NA)
+  
+  tnet <- net
+  temp2[ismall, 2] <- 0
+  temp2[ibig, 2] <- 1
+  E(tnet)$color <- apply(temp2, 1, function(z) alpha(z[1], as.numeric(z[2])))
+  
+  
+  plot(tnet, add=TRUE, 
+       layout=L, 
+       edge.curved=ecurve,
+       edge.arrow.width	=eaw*frac,
+       vertex.label.font=2,
+       vertex.label.family	= "Helvetica",
+       vertex.label.color=vcol, 
+       vertex.label.cex=vlc*frac+.3, 
+       vertex.label.degree=pi/2,
+       vertex.label.dist=vdist*frac+c(0, 2.5, 0, 1),
+       vertex.frame.color=NA)
+  
+  dev.off()
+  
+  
+  # dev.off()
+  
+  ####
+  
+  
+  
+  
+  
+  
   # 
-  # r <-  c("mn", "mp", "vn", "vp")
-  # fittype <- "biten_sparse"
+  # # Plot params
+  # frac <- .65   # dialation of B relative to A and C
+  # vlc <- 1.4    # vertex label cex
+  # av <- 20     # vertex size intercept
+  # bv <- 400     # vertex size slope
+  # eaw <- 2.3    # edge arrow width
+  # ae <- 6       # edge size intercept
+  # be <- 200     # edge size slsope
   # 
-  # arccolors <- brewer.pal(11, "Spectral")[c(1,3,5,7,9,11)]
-  # icolors <- match(codes$continent, sort(unique(codes$continent)))
+  # continents <- unique( codes$continent[order(codes$continent)] )
+  # circle_colors <- brewer.pal(11, "Spectral")[c(1,5,11,3,9,7)]
+  # # circle_colors <- brewer.pal(6, "Spectral")
+  # circle_colors_trans <- paste0(circle_colors, 95)
+  # # library("igraph")
   # 
-  # for(m in 1:4){
-  #   # outdir <- paste0(instub, "_j", j)
-  #   r <- resp_type[m]
-  #   if(lag == 2){ps <- paste0("_lag", lag, "_diff", as.numeric(diff), "_Lmin")} else {ps <- ""}
-  #   
-  #   # A <- as.matrix( read.table(list.files(pattern=paste0("A_fullfit_", fittype, "_FM_", r, ps, ".txt"))) )
-  #   # B <- as.matrix( read.table(list.files(pattern=paste0("B_fullfit_", fittype, "_FM_", r, ps, ".txt"))) )
-  #   A <- as.matrix( read.table(file.path(readdir, paste0("A_fullfit_", fittype, "_FM_", r, "_lag", lag,"_diff", as.numeric(diff), "_Lmin.txt"))) )
-  #   B <- as.matrix( read.table(file.path(readdir, paste0("B_fullfit_", fittype, "_FM_", r, "_lag", lag, "_diff", as.numeric(diff), "_Lmin.txt"))) )
-  #   
-  #   
-  #   Yhat <- amprod(D[,,m,], A, 1) + amprod(D[,,m,], t(B), 2)
-  #   e <- Y[,,m,] - Yhat 
-  #   
-  #   
-  #   # Matricizing resids
-  #   mm <- mat(e,1)
-  #   mm[is.na(mm)] <- 0
-  #   ee <- tcrossprod(mm)
-  #   pplot <- prcomp(ee, scale=T)$rotation
-  #   pdf(file.path(plotdir,paste0("exporter_resid_PCA_", resp_type[m], ".pdf")), width=4, height=4)
-  #   par(mar=c(3,3,.5,.5), cex.axis=.8, cex.lab=.8, mgp=c(1.7,.5,0))
-  #   plot(NA, NA, xlim=range(pplot[,1]), ylim=range(pplot[,2]), xlab="PCA 1", ylab="PCA 2")
-  #   text(pplot[,1], pplot[,2], labels=rownames(pplot), offset=0, col=arccolors[icolors], cex=1.4) #rownames(pplot)) # text(rownames(pplot)))
-  #   dev.off()
-  #   
-  #   
-  #   mm <- mat(e,2)
-  #   mm[is.na(mm)] <- 0
-  #   ee <- tcrossprod(mm)
-  #   pplot <- prcomp(ee, scale=T)$rotation
-  #   pdf(file.path(plotdir,paste0("importer_resid_PCA_", resp_type[m], ".pdf")), width=4, height=4)
-  #   par(mar=c(3,3,.5,.5), cex.axis=.8, cex.lab=.8, mgp=c(1.7,.5,0))
-  #   plot(NA, NA, xlim=range(pplot[,1]), ylim=range(pplot[,2]), xlab="PCA 1", ylab="PCA 2")
-  #   text(pplot[,1], pplot[,2], labels=rownames(pplot), col=arccolors[icolors], offset=0, cex=1.4) #rownames(pplot)) # text(rownames(pplot)))
-  #   dev.off()
-  #   
-  #   
-  #   mm <- mat(e,3)
-  #   mm[is.na(mm)] <- 0
-  #   ee <- tcrossprod(mm)
-  #   eecor <- cov2cor(ee)
-  #   rows <- matrix(1:tmax, tmax, tmax)
-  #   cols <- matrix(1:tmax, tmax, tmax, byrow = TRUE)
-  #   imat <- abs(rows - cols)
-  #   ncor <- 10
-  #   blw <- 2
-  #   quants <- c(.025,.1,.5,.9,.975)
-  #   boxtoplot <- matrix(0, 5, ncor)
-  #   for(j in 1:ncor){
-  #     boxtoplot[,j] <- quantile(eecor[imat == j], quants, na.rm=TRUE)
-  #   }
-  #   
-  #   pdf(file.path(plotdir,paste0("year_resid_boxplot_", resp_type[m], ".pdf")), width=4, height=4)
-  #   par(mar=c(3,3,.5,.5), cex.axis=.8, cex.lab=.8, mgp=c(1.7,.5,0))
-  #   boxplot(boxtoplot, xlab="lag", ylab="Estimated correlation", range=0, border=arccolors[1],
-  #           boxlwd=blw, whisklty=1, whisklwd=blw, staplelty=1, staplelwd=blw, outlwd=blw)
-  #   abline(h=0, col="gray80")
-  #   dev.off()
-  #   
-  # }
+  # j <- 1
+  # C <- as.matrix(A[[j]])
+  # colnames(C) <- rownames(C) <- countries
+  # i1 <- which(C != 0, arr.ind=TRUE)
+  # EL <- cbind(countries[i1[,1]], countries[i1[,2]])
+  # 
+  # net <- graph_from_edgelist(EL, directed=TRUE)
+  # E(net)$weight <- C[i1]                           
+  # V(net)$label <- names(V(net))
+  # V(net)$continent <- codes$continent[match(names(V(net)), codes$country)]
+  # V(net)$color <- circle_colors_trans[ match(V(net)$continent, continents) ]
+  # ordering <- V(net)$label[ order(V(net)$continent) ] #[keep]
+  # L <- layout_in_circle(net, order=ordering)
+  # # V(net)$label <- codes$country
+  # # V(net)$color <- circle_colors_trans[match(codes$continent[ match(V(net)$label, codes$country) ], continents)]
+  # E(net)$color <- circle_colors[ match(codes$continent[match(as_edgelist(net)[,1], countries)], continents) ]
+  # E(net)$lty <- 3 - 2*(E(net)$weight >0)
+  # 
+  # V(net)$size <- av + bv*(rowSums(abs(C)) + colSums(abs(C)) )[V(net)$label]
+  # E(net)$width <- ae + be*E(net)$weight
+  # 
+  # 
+  # png(file.path(plotdir, paste0("B_circle_", j, ".png")), width=5, height=5, res=200, units="in")
+  # par(mar = c(0, 0, 0, 0), mgp=c(1.7,.5,0), cex.lab=1.1, cex.axis=1.1) 
+  # plot(net, 
+  #      layout=L, 
+  #      edge.curved=.25,
+  #      edge.arrow.width	=eaw,
+  #      vertex.label.font=2,
+  #      vertex.label.family	= "Helvetica",
+  #      vertex.label.color="gray30", 
+  #      vertex.label.cex=vlc, 
+  #      # vertex.label.degree=pi/2,
+  #      # vertex.label.dist=2.1,
+  #      vertex.frame.color=NA)
+  # dev.off()
+  # 
+  # 
+  # 
+  # j <- 2
+  # C <- as.matrix(A[[j]])
+  # colnames(C) <- rownames(C) <- countries
+  # i1 <- which(C != 0, arr.ind=TRUE)
+  # EL <- cbind(countries[i1[,1]], countries[i1[,2]])
+  # 
+  # net <- graph_from_edgelist(EL, directed=TRUE)
+  # E(net)$weight <- C[i1]                           
+  # V(net)$label <- names(V(net))
+  # V(net)$continent <- codes$continent[match(names(V(net)), codes$country)]
+  # V(net)$color <- circle_colors_trans[ match(V(net)$continent, continents) ]
+  # ordering <- V(net)$label[ order(V(net)$continent) ] #[keep]
+  # L <- layout_in_circle(net, order=ordering)
+  # # V(net)$label <- codes$country
+  # # V(net)$color <- circle_colors_trans[match(codes$continent[ match(V(net)$label, codes$country) ], continents)]
+  # 
+  # E(net)$color <- circle_colors[ match(codes$continent[match(as_edgelist(net)[,1], countries)], continents) ]
+  # E(net)$lty <- 3 - 2*(E(net)$weight >0)
+  # 
+  # V(net)$size <- (av + bv*(rowSums(abs(C)) + colSums(abs(C)) )[V(net)$label])*frac
+  # E(net)$width <- (ae + be*E(net)$weight)*frac
+  # 
+  # 
+  # png(file.path(plotdir, paste0("B_circle_", j, ".png")), width=5/frac, height=5/frac, res=200, units="in")
+  # par(mar = c(0, 0, 0, 0), mgp=c(1.7,.5,0), cex.lab=1.1, cex.axis=1.1) 
+  # plot(net, 
+  #      layout=L, 
+  #      edge.curved=.3,
+  #      edge.arrow.width	=eaw*frac,
+  #      vertex.label.font=2,
+  #      vertex.label.family	= "Helvetica",
+  #      vertex.label.color="gray30", 
+  #      vertex.label.cex=vlc*frac*1.4,
+  #      # vertex.label.degree=pi/2,
+  #      # vertex.label.dist=1.2,
+  #      vertex.frame.color=NA)
+  # dev.off()
+  # # edge.lty=E(net)$edge.lty, 
+  # 
+  # # edge.width=E(net)$edge.width,
+  # # vertex.color=V(net)$vertex.color, 
+  # 
+  # 
+  # # vertex.size = V(net)$vertex.size, 
+  # 
+  # 
+  # 
+  # 
+  # circle_colors <- brewer.pal(11, "Spectral")[c(5,1,9,11)]  
+  # circle_colors_trans <- paste0(circle_colors, 95)
+  # 
+  # j <- 3
+  # C <- as.matrix(A[[j]])
+  # colnames(C) <- rownames(C) <- resp
+  # i1 <- which(C != 0, arr.ind=TRUE)
+  # EL <- cbind(resp[i1[,1]], resp[i1[,2]])
+  # 
+  # 
+  # net <- graph_from_edgelist(EL, directed=TRUE)
+  # E(net)$weight <- C[i1]                           
+  # V(net)$label <- names(V(net))
+  # # V(net)$continent <- codes$continent[match(names(V(net)), codes$country)]
+  # V(net)$color <- circle_colors_trans
+  # ordering <- order(V(net)$label)
+  # L <- layout_in_circle(net, order=c("vn", "mn", "vp", "mp"))
+  # # V(net)$label <- codes$country
+  # # V(net)$color <- circle_colors_trans[match(codes$continent[ match(V(net)$label, codes$country) ], continents)]
+  # E(net)$color <- circle_colors[match(as_edgelist(net)[,1], V(net)$label)]
+  # E(net)$lty <- 3 - 2*(E(net)$weight >0)
+  # 
+  # V(net)$size <- av + bv*(rowSums(abs(C)) + colSums(abs(C)) )[V(net)$label]
+  # E(net)$width <- ae + be*E(net)$weight
+  # 
+  # 
+  # png(file.path(plotdir, paste0("B_circle_", j, ".png")), width=5, height=5, res=200, units="in")
+  # par(mar = c(0, 0, 0, 0), mgp=c(1.7,.5,0), cex.lab=1.1, cex.axis=1.1) 
+  # plot(net, 
+  #      layout=L, 
+  #      edge.curved=.25,
+  #      edge.arrow.width	=eaw,
+  #      vertex.label.font=2,
+  #      vertex.label.family	= "Helvetica",
+  #      vertex.label.color="gray30", 
+  #      vertex.label.cex=vlc, 
+  #      # vertex.label.degree=pi/2,
+  #      # vertex.label.dist=2.1,2
+  #      vertex.frame.color=NA)
+  # dev.off()
   
+  ####
+
+
 }
 ####
 
